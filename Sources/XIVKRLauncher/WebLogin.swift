@@ -189,9 +189,9 @@ final class WebLoginController: NSObject, WKNavigationDelegate, WKUIDelegate, NS
         view.load(URLRequest(url: officialLoginURL, cachePolicy: .reloadIgnoringLocalCacheData))
     }
 
-    /// Tears down the ephemeral page session. The main window itself is left
-    /// to AppKit's close/terminate path, so a successful launch does not make
-    /// the launcher disappear underneath the user.
+    /// Tears down the ephemeral page session. The caller owns closing the
+    /// window so authentication failures can keep it visible while a
+    /// successful game launch follows the official launcher's exit behavior.
     func close() {
         guard !closed else { return }
         closed = true
@@ -296,9 +296,8 @@ final class WebLoginController: NSObject, WKNavigationDelegate, WKUIDelegate, NS
                 // The token is scoped to this call and is never persisted or
                 // returned to the page after the launch request.
                 try await self.launch(token)
-                self.phase = .ready
                 self.message("게임을 실행했습니다.")
-                self.showLauncherMessage("게임을 실행했습니다. 공식 런처를 닫지 않고 게임을 계속 실행할 수 있습니다.")
+                self.closeWindow()
             } catch {
                 self.fail(Self.displayError(error))
             }
