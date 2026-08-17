@@ -1,14 +1,14 @@
-# Third-party runtime notices
+# 외부 런타임 고지
 
-This launcher does not repackage the XIV on Mac runtime. On first launch it
-downloads the official pinned XIV on Mac archive directly from its distributor
-and verifies SHA-256 before use. XIV on Mac is GPL-3.0; WineCX and DXMT remain
-LGPL-2.1-or-later. Their upstream license terms continue to apply.
+이 런처는 XIV on Mac 런타임을 재포장하지 않습니다. 처음 실행할 때 공식
+배포처에서 고정된 XIV on Mac 아카이브를 직접 다운로드하고, SHA-256을
+검증한 뒤 사용합니다. XIV on Mac은 GPL-3.0이며 WineCX와 DXMT에는
+LGPL-2.1-or-later가 계속 적용됩니다.
 
 - https://github.com/marzent/XIV-on-Mac
 - https://github.com/marzent/winecx
 - https://github.com/3Shain/dxmt
 
-FINAL FANTASY XIV and related names are trademarks of Square Enix. This
-launcher is unofficial and is not affiliated with Square Enix, Actoz Soft,
-CodeWeavers, or the XIV on Mac project.
+FINAL FANTASY XIV와 관련 명칭은 Square Enix의 상표입니다. 이 런처는
+Square Enix·액토즈소프트·CodeWeavers·XIV on Mac과 관련 없는 비공식
+프로젝트입니다.

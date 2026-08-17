@@ -1,23 +1,28 @@
 # FFXIV on Mac KR
 
-Unofficial native macOS launcher for the Korean FINAL FANTASY XIV client.
+한국 FINAL FANTASY XIV 클라이언트를 Apple Silicon Mac에서 실행하기 위한
+비공식 네이티브 런처입니다.
 
-- Actoz login through the official launcher page
-- Official full-file install and ZiPatch updates
-- Standalone XIV on Mac runtime; CrossOver is not used
+- 한국 공식 런처 페이지를 이용한 액토즈 계정 로그인
+- 공식 파일 목록을 이용한 설치와 ZiPatch 업데이트
+- 독립 XIV on Mac 런타임 사용—CrossOver 불필요
+- 다운로드 진행률과 Dock 진행률 표시
 
-The app is experimental, unsigned, and intended for Apple Silicon Macs.
+현재 앱은 개인용 실험 버전이며 서명·공증되지 않았습니다. Apple Silicon
+Mac만 지원합니다.
+
+## 빌드
 
 ```sh
 swift test --disable-sandbox
 scripts/package.sh
 ```
 
-On first game launch, the app downloads the official XIV on Mac runtime
-archive directly from `softwareupdate.xivmac.com` and verifies its pinned
-SHA-256 before extracting only Wine and `d3dcompiler_47.dll`.
+게임을 처음 실행할 때 `softwareupdate.xivmac.com`에서 공식 XIV on Mac
+런타임을 직접 다운로드합니다. 고정된 SHA-256을 검증한 뒤 Wine과
+`d3dcompiler_47.dll`만 독립 prefix에 설치합니다.
 
-This project is licensed under GPL-3.0. Third-party components retain their
-own licenses. FINAL FANTASY XIV is a trademark of Square Enix. This
-project is not affiliated with Square Enix, Actoz Soft, CodeWeavers, or XIV on
-Mac.
+이 프로젝트는 GPL-3.0으로 배포합니다. 외부 구성요소에는 각 구성요소의
+라이선스가 적용됩니다. FINAL FANTASY XIV는 Square Enix의 상표이며, 이
+프로젝트는 Square Enix·액토즈소프트·CodeWeavers·XIV on Mac과 관련 없는
+비공식 프로젝트입니다.
