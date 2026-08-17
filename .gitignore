@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+.pnpm-store/
+.vite/
+node_modules/
+out/
+Tools/zipatch-helper/target/
+*.log
