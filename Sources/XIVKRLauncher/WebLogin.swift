@@ -149,7 +149,10 @@ final class WebLoginController: NSObject, WKNavigationDelegate, WKUIDelegate, NS
         resetPatchSpeed()
         resizeForLogin()
 
-        let dataStore = WKWebsiteDataStore.nonPersistent()
+        // Match the official launcher's cookie behavior. The WebView is still
+        // navigation-locked to the exact official origin, while its persistent
+        // cookie jar lets the site's own "아이디 저장" option work.
+        let dataStore = WKWebsiteDataStore.default()
         let userContentController = WKUserContentController()
         userContentController.addUserScript(WKUserScript(
             source: bridgeScript(),
@@ -199,18 +202,12 @@ final class WebLoginController: NSObject, WKNavigationDelegate, WKUIDelegate, NS
         cancelUpdate()
         updateTask = nil
         patchProgressCoalescer.clear()
-        let dataStore = webView?.configuration.websiteDataStore
         webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "xivkr")
         dragOverlay?.removeFromSuperview()
         dragOverlay = nil
-        if let dataStore {
-            dataStore.fetchDataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()) { records in
-                dataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: records) {}
-            }
-        }
         parent.delegate = nil
         webView = nil
     }
