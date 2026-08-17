@@ -289,7 +289,7 @@ final class WebLoginController: NSObject, WKNavigationDelegate, WKUIDelegate, NS
             return
         }
         phase = .launching
-        showLauncherMessage("독립 Wine 런타임을 준비하고 게임을 실행하는 중…")
+        showLauncherMessage("게임을 실행하는 중…")
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -436,7 +436,7 @@ final class WebLoginController: NSObject, WKNavigationDelegate, WKUIDelegate, NS
                 } else {
                     LauncherLog.shared.record(.installFailed)
                     self.message("게임 업데이트에 실패했습니다.")
-                    self.showLauncherError("게임 업데이트에 실패했습니다.")
+                    self.showLauncherError(Self.displayError(error))
                 }
             }
             self.updateTask = nil

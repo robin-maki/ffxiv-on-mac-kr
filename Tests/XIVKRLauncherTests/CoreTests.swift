@@ -18,6 +18,20 @@ final class CoreTests: XCTestCase {
         var value = 0
     }
 
+    private final class ProgressValues: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [Int64] = []
+
+        func append(_ value: Int64) {
+            lock.lock(); storage.append(value); lock.unlock()
+        }
+
+        var values: [Int64] {
+            lock.lock(); defer { lock.unlock() }
+            return storage
+        }
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("xiv-kr-\(UUID().uuidString)", isDirectory: true)
@@ -413,13 +427,19 @@ final class CoreTests: XCTestCase {
         let resources = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let runtime = WineRuntime(baseURL: resources)
         XCTAssertEqual(runtime.wine, resources.appendingPathComponent("wine/bin/wine"))
+        XCTAssertEqual(runtime.d3d11, resources.appendingPathComponent("dxmt/d3d11.dll"))
+        XCTAssertEqual(runtime.dxgi, resources.appendingPathComponent("dxmt/dxgi.dll"))
         let prefix = resources.appendingPathComponent("prefix")
         let environment = runtime.environment(prefixURL: prefix, base: ["PATH": "/usr/bin"])
         XCTAssertEqual(environment["WINEPREFIX"], prefix.path)
         XCTAssertEqual(environment["WINEARCH"], "win64")
         XCTAssertEqual(environment["WINEMSYNC"], "1")
         XCTAssertEqual(environment["DXMT_ENABLE_NVEXT"], "1")
-        XCTAssertEqual(environment["WINEDLLOVERRIDES"], "d3dcompiler_47=n,b")
+        XCTAssertEqual(
+            environment["WINEDLLOVERRIDES"],
+            "msquic=,mscoree=n,b;d3d11=n;dxgi=n,b;d3dcompiler_47=n,b"
+        )
+        XCTAssertEqual(environment["XL_WINEONLINUX"], "true")
         XCTAssertTrue(environment["PATH"]?.hasPrefix(resources.appendingPathComponent("wine/bin").path) == true)
     }
 
@@ -442,6 +462,10 @@ final class CoreTests: XCTestCase {
         let compiler = resources.appendingPathComponent("d3dcompiler/d3dcompiler_47.dll")
         try FileManager.default.createDirectory(at: compiler.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("dll".utf8).write(to: compiler)
+        let dxmt = resources.appendingPathComponent("dxmt", isDirectory: true)
+        try FileManager.default.createDirectory(at: dxmt, withIntermediateDirectories: true)
+        try Data("d3d11".utf8).write(to: dxmt.appendingPathComponent("d3d11.dll"))
+        try Data("dxgi".utf8).write(to: dxmt.appendingPathComponent("dxgi.dll"))
 
         let archive = root.appendingPathComponent("runtime.tar.gz")
         let tar = Process()
@@ -450,7 +474,8 @@ final class CoreTests: XCTestCase {
             "-czf", archive.path,
             "-C", root.appendingPathComponent("fixture").path,
             "XIV on Mac.app/Contents/Resources/wine",
-            "XIV on Mac.app/Contents/Resources/d3dcompiler"
+            "XIV on Mac.app/Contents/Resources/d3dcompiler",
+            "XIV on Mac.app/Contents/Resources/dxmt"
         ]
         try tar.run()
         tar.waitUntilExit()
@@ -470,6 +495,36 @@ final class CoreTests: XCTestCase {
             runtime: destination
         )
         XCTAssertTrue(destination.isInstalled)
+    }
+
+    func testRuntimeDownloadStreamsToDiskAndReportsProgress() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let destination = root.appendingPathComponent("runtime.part")
+        let first = Data(repeating: 0x11, count: 3)
+        let second = Data(repeating: 0x22, count: 5)
+        let body = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(first)
+            continuation.yield(second)
+            continuation.finish()
+        }
+        let fetcher: DownloadFetcher = { request in
+            DownloadResponse(
+                statusCode: 200,
+                headers: ["Content-Length": "8"],
+                finalURL: request.url,
+                body: body
+            )
+        }
+        let progress = ProgressValues()
+        try await downloadRuntimeArchive(
+            from: runtimeDownloadURL,
+            to: destination,
+            fetcher: fetcher,
+            onProgress: { downloaded, _ in progress.append(downloaded) }
+        )
+        XCTAssertEqual(try Data(contentsOf: destination), first + second)
+        XCTAssertEqual(progress.values, [3, 8])
     }
 
     private func md5(_ data: Data) throws -> String {

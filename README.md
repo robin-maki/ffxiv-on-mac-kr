@@ -18,9 +18,10 @@ swift test --disable-sandbox
 scripts/package.sh
 ```
 
-게임을 처음 실행할 때 `softwareupdate.xivmac.com`에서 공식 XIV on Mac
-런타임을 직접 다운로드합니다. 고정된 SHA-256을 검증한 뒤 Wine과
-`d3dcompiler_47.dll`만 독립 prefix에 설치합니다.
+게임 시작 버튼을 표시하기 전에 같은 업데이트 화면에서
+`softwareupdate.xivmac.com`의 공식 XIV on Mac 런타임을 직접 내려받고,
+고정된 SHA-256 검증·압축 해제·prefix 초기화·DXMT 및 `d3dcompiler_47.dll`
+설치까지 완료합니다.
 
 이 프로젝트는 GPL-3.0으로 배포합니다. 외부 구성요소에는 각 구성요소의
 라이선스가 적용됩니다. FINAL FANTASY XIV는 Square Enix의 상표이며, 이

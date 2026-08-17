@@ -486,11 +486,18 @@ public struct InstallProgress: Sendable {
 public struct DownloadResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
+    public let finalURL: URL?
     public let body: AsyncThrowingStream<Data, Error>
 
-    public init(statusCode: Int, headers: [String: String] = [:], body: AsyncThrowingStream<Data, Error>) {
+    public init(
+        statusCode: Int,
+        headers: [String: String] = [:],
+        finalURL: URL? = nil,
+        body: AsyncThrowingStream<Data, Error>
+    ) {
         self.statusCode = statusCode
         self.headers = Dictionary(uniqueKeysWithValues: headers.map { ($0.key.lowercased(), $0.value) })
+        self.finalURL = finalURL
         self.body = body
     }
 }
@@ -571,9 +578,14 @@ public let urlSessionFetcher: DownloadFetcher = { request in
             if !buffer.isEmpty { try await emit(buffer) }
         }
         let http = response as? HTTPURLResponse
-        return DownloadResponse(statusCode: http?.statusCode ?? 0, headers: http?.allHeaderFields.reduce(into: [:]) { result, item in
-            result[String(describing: item.key).lowercased()] = String(describing: item.value)
-        } ?? [:], body: stream)
+        return DownloadResponse(
+            statusCode: http?.statusCode ?? 0,
+            headers: http?.allHeaderFields.reduce(into: [:]) { result, item in
+                result[String(describing: item.key).lowercased()] = String(describing: item.value)
+            } ?? [:],
+            finalURL: response.url,
+            body: stream
+        )
     } catch is CancellationError {
         throw LauncherError.cancelled
     } catch {
@@ -923,18 +935,24 @@ public struct WineRuntime: Sendable {
     public let root: URL
     public let wine: URL
     public let d3dcompiler: URL
+    public let d3d11: URL
+    public let dxgi: URL
 
     public init(baseURL: URL) {
         self.base = baseURL
         self.root = baseURL.appendingPathComponent("wine", isDirectory: true)
         self.wine = root.appendingPathComponent("bin/wine")
         self.d3dcompiler = baseURL.appendingPathComponent("d3dcompiler/d3dcompiler_47.dll")
+        self.d3d11 = baseURL.appendingPathComponent("dxmt/d3d11.dll")
+        self.dxgi = baseURL.appendingPathComponent("dxmt/dxgi.dll")
     }
 
     public var isInstalled: Bool {
         FileManager.default.isExecutableFile(atPath: wine.path) &&
             FileManager.default.fileExists(atPath: root.appendingPathComponent("lib/wine").path) &&
-            FileManager.default.fileExists(atPath: d3dcompiler.path)
+            FileManager.default.fileExists(atPath: d3dcompiler.path) &&
+            FileManager.default.fileExists(atPath: d3d11.path) &&
+            FileManager.default.fileExists(atPath: dxgi.path)
     }
 
     public func environment(prefixURL: URL, base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
@@ -946,7 +964,11 @@ public struct WineRuntime: Sendable {
         environment["WINEDLLPATH"] = root.appendingPathComponent("lib/wine").path
         environment["WINEMSYNC"] = "1"
         environment["DXMT_ENABLE_NVEXT"] = "1"
-        environment["WINEDLLOVERRIDES"] = "d3dcompiler_47=n,b"
+        // XIV on Mac's runner selects its native DXMT d3d11/dxgi modules.
+        // Without these overrides Wine falls back to WineD3D and FFXIV exits
+        // with the DirectX (10000000) fatal-error dialog.
+        environment["WINEDLLOVERRIDES"] = "msquic=,mscoree=n,b;d3d11=n;dxgi=n,b;d3dcompiler_47=n,b"
+        environment["XL_WINEONLINUX"] = "true"
         environment["WINEDEBUG"] = "-all"
         environment["LANG"] = "en_US"
         environment["MVK_CONFIG_LOG_LEVEL"] = "mvk_error"
@@ -975,7 +997,8 @@ public func installRuntimeArchive(
         arguments: [
             "-xf", archiveURL.path, "-C", staging.path,
             "XIV on Mac.app/Contents/Resources/wine",
-            "XIV on Mac.app/Contents/Resources/d3dcompiler"
+            "XIV on Mac.app/Contents/Resources/d3dcompiler",
+            "XIV on Mac.app/Contents/Resources/dxmt"
         ]
     )
     let resources = staging.appendingPathComponent("XIV on Mac.app/Contents/Resources", isDirectory: true)
@@ -994,6 +1017,75 @@ public func installRuntimeArchive(
         at: extracted.d3dcompiler.deletingLastPathComponent(),
         to: runtime.d3dcompiler.deletingLastPathComponent()
     )
+    try fileManager.moveItem(
+        at: extracted.d3d11.deletingLastPathComponent(),
+        to: runtime.d3d11.deletingLastPathComponent()
+    )
+}
+
+/// Streams the pinned runtime archive directly to disk. The shared fetcher
+/// emits bounded 4 MiB chunks, so resident memory does not grow with the
+/// archive size while the official launcher receives byte progress.
+public func downloadRuntimeArchive(
+    from source: URL,
+    to destination: URL,
+    fetcher: @escaping DownloadFetcher = urlSessionFetcher,
+    onProgress: @escaping @Sendable (_ downloaded: Int64, _ total: Int64) -> Void = { _, _ in },
+    isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled }
+) async throws {
+    guard source.scheme?.lowercased() == "https",
+          source.host?.lowercased() == runtimeDownloadURL.host?.lowercased(),
+          source.user == nil, source.password == nil else {
+        throw LauncherError.network("Wine 런타임 다운로드 주소가 올바르지 않습니다.")
+    }
+    let response: DownloadResponse
+    do {
+        response = try await fetcher(makeRequest(url: source, range: nil))
+    } catch is CancellationError {
+        throw LauncherError.cancelled
+    } catch let error as LauncherError {
+        throw error
+    } catch {
+        throw LauncherError.network("독립 Wine 런타임을 다운로드하지 못했습니다.")
+    }
+    guard response.statusCode == 200,
+          let finalURL = response.finalURL,
+          finalURL.scheme?.lowercased() == "https",
+          finalURL.host?.lowercased() == source.host?.lowercased(),
+          let total = header(response, "content-length").flatMap(Int64.init), total > 0 else {
+        throw LauncherError.network("독립 Wine 런타임 응답이 올바르지 않습니다.")
+    }
+
+    try FileManager.default.createDirectory(
+        at: destination.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    FileManager.default.createFile(atPath: destination.path, contents: nil)
+    let handle = try FileHandle(forWritingTo: destination)
+    var downloaded: Int64 = 0
+    do {
+        try handle.truncate(atOffset: 0)
+        for try await chunk in response.body {
+            if isCancelled() { throw LauncherError.cancelled }
+            try Task.checkCancellation()
+            guard downloaded + Int64(chunk.count) <= total else {
+                throw LauncherError.network("Wine 런타임 파일 크기가 올바르지 않습니다.")
+            }
+            try handle.write(contentsOf: chunk)
+            downloaded += Int64(chunk.count)
+            onProgress(downloaded, total)
+        }
+        try handle.close()
+    } catch is CancellationError {
+        try? handle.close()
+        throw LauncherError.cancelled
+    } catch {
+        try? handle.close()
+        throw error
+    }
+    guard downloaded == total else {
+        throw LauncherError.network("Wine 런타임 파일 크기가 올바르지 않습니다.")
+    }
 }
 
 private func runProcess(
@@ -1103,6 +1195,7 @@ final class LauncherCore: LauncherCoreAPI {
     func install(progress: @escaping @Sendable (LauncherProgress) -> Void) async throws -> GameVersions {
         cancellation.reset()
         try cancellation.check()
+        try await prepareExecutionEnvironment(progress: progress)
 
         // An existing Korean client must be advanced with the official
         // ZiPatch chain. FileListGame.json is a complete-file manifest and
@@ -1163,7 +1256,7 @@ final class LauncherCore: LauncherCoreAPI {
             current: local,
             latest: plan.latestGameVersion,
             installed: true,
-            updateRequired: plan.hasUpdates
+            updateRequired: plan.hasUpdates || !executionEnvironmentIsReady
         )
     }
 
@@ -1172,17 +1265,18 @@ final class LauncherCore: LauncherCoreAPI {
     }
 
     func launch(token: String) async throws {
-        try await ensureRuntime()
         try ensureExecutionRuntime()
         CoreLaunchDiagnostics.info("Wine runtime check", details: [
-            "wine": runtime.isInstalled ? "managed" : "crossover"
+            "wine": "managed"
         ])
 
-        let prefixExists = fileManager.fileExists(atPath: prefixURL.path)
+        let prefixExists = executionEnvironmentIsReady
         CoreLaunchDiagnostics.info("Wine prefix check", details: [
-            "state": prefixExists ? "present" : "missing"
+            "state": prefixExists ? "ready" : "missing-or-incomplete"
         ])
-        try await ensurePrefix()
+        guard prefixExists else {
+            throw LauncherError.runtime("Wine 실행 환경이 준비되지 않았습니다. 먼저 업데이트를 완료해 주세요.")
+        }
 
         CoreLaunchDiagnostics.info("Wine prefix ready")
         let validatedToken: String
@@ -1358,19 +1452,72 @@ final class LauncherCore: LauncherCoreAPI {
         }
     }
 
-    private func ensureRuntime() async throws {
+    private var executionEnvironmentIsReady: Bool {
+        guard runtime.isInstalled,
+              fileManager.fileExists(atPath: prefixURL.appendingPathComponent("system.reg").path) else {
+            return false
+        }
+        let installedCompiler = prefixURL.appendingPathComponent(
+            "drive_c/windows/system32/d3dcompiler_47.dll"
+        )
+        let system32 = installedCompiler.deletingLastPathComponent()
+        return fileManager.contentsEqual(atPath: runtime.d3dcompiler.path, andPath: installedCompiler.path) &&
+            fileManager.contentsEqual(
+                atPath: runtime.d3d11.path,
+                andPath: system32.appendingPathComponent("d3d11.dll").path
+            ) &&
+            fileManager.contentsEqual(
+                atPath: runtime.dxgi.path,
+                andPath: system32.appendingPathComponent("dxgi.dll").path
+            )
+    }
+
+    private func prepareExecutionEnvironment(
+        progress: @escaping @Sendable (LauncherProgress) -> Void
+    ) async throws {
+        try await ensureRuntime(progress: progress)
+        guard !executionEnvironmentIsReady else { return }
+        progress(LauncherProgress(
+            index: 0, total: 1,
+            fileName: "Wine 실행 환경 초기화",
+            downloaded: 0, fileSize: 1,
+            downloadedTotal: 0, totalSize: 1
+        ))
+        try await ensurePrefix()
+        progress(LauncherProgress(
+            index: 0, total: 1,
+            fileName: "Wine 실행 환경 초기화",
+            downloaded: 1, fileSize: 1,
+            downloadedTotal: 1, totalSize: 1
+        ))
+    }
+
+    private func ensureRuntime(
+        progress: @escaping @Sendable (LauncherProgress) -> Void
+    ) async throws {
         if runtime.isInstalled { return }
         CoreLaunchDiagnostics.info("Wine runtime download requested")
+        let archive = runtime.base.deletingLastPathComponent()
+            .appendingPathComponent("XIV-on-Mac-\(runtimeDownloadSHA256.prefix(12)).tar.xz.part")
+        defer { try? fileManager.removeItem(at: archive) }
         do {
-            let (temporary, response) = try await URLSession.shared.download(from: runtimeDownloadURL)
-            guard let response = response as? HTTPURLResponse,
-                  response.statusCode == 200,
-                  response.url?.scheme?.lowercased() == "https",
-                  response.url?.host?.lowercased() == runtimeDownloadURL.host?.lowercased() else {
-                throw LauncherError.network("독립 Wine 런타임을 다운로드하지 못했습니다.")
-            }
+            try await downloadRuntimeArchive(
+                from: runtimeDownloadURL,
+                to: archive,
+                fetcher: urlSessionFetcher,
+                onProgress: { downloaded, total in
+                    progress(LauncherProgress(
+                        index: 0, total: 1,
+                        fileName: "Wine 런타임 다운로드",
+                        downloaded: downloaded, fileSize: total,
+                        downloadedTotal: downloaded, totalSize: total
+                    ))
+                },
+                isCancelled: { [cancellation] in cancellation.isCancelled }
+            )
+            try cancellation.check()
             try await installRuntimeArchive(
-                temporary,
+                archive,
                 expectedSHA256: runtimeDownloadSHA256,
                 runtime: runtime,
                 fileManager: fileManager
@@ -1399,7 +1546,7 @@ final class LauncherCore: LauncherCoreAPI {
             }
             CoreLaunchDiagnostics.info("Wine prefix created")
         }
-        try installD3DCompiler()
+        try installGraphicsBackend()
         try fileManager.createDirectory(at: gameURL, withIntermediateDirectories: true)
     }
 
@@ -1418,11 +1565,17 @@ final class LauncherCore: LauncherCoreAPI {
         }
     }
 
-    private func installD3DCompiler() throws {
+    private func installGraphicsBackend() throws {
         let system32 = prefixURL.appendingPathComponent("drive_c/windows/system32", isDirectory: true)
         try fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
-        let destination = system32.appendingPathComponent("d3dcompiler_47.dll")
-        guard !fileManager.contentsEqual(atPath: runtime.d3dcompiler.path, andPath: destination.path) else { return }
+        try installNativeDLL(runtime.d3dcompiler, in: system32)
+        try installNativeDLL(runtime.d3d11, in: system32)
+        try installNativeDLL(runtime.dxgi, in: system32)
+    }
+
+    private func installNativeDLL(_ source: URL, in system32: URL) throws {
+        let destination = system32.appendingPathComponent(source.lastPathComponent)
+        guard !fileManager.contentsEqual(atPath: source.path, andPath: destination.path) else { return }
         let backup = destination.appendingPathExtension("xivkr-builtin")
         if fileManager.fileExists(atPath: destination.path) {
             if !fileManager.fileExists(atPath: backup.path) {
@@ -1430,7 +1583,7 @@ final class LauncherCore: LauncherCoreAPI {
             }
             try fileManager.removeItem(at: destination)
         }
-        try fileManager.copyItem(at: runtime.d3dcompiler, to: destination)
+        try fileManager.copyItem(at: source, to: destination)
     }
 
 }

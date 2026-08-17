@@ -1,8 +1,8 @@
 # 외부 런타임 고지
 
-이 런처는 XIV on Mac 런타임을 재포장하지 않습니다. 처음 실행할 때 공식
-배포처에서 고정된 XIV on Mac 아카이브를 직접 다운로드하고, SHA-256을
-검증한 뒤 사용합니다. XIV on Mac은 GPL-3.0이며 WineCX와 DXMT에는
+이 런처는 XIV on Mac 런타임을 재포장하지 않습니다. 실행 환경 준비 과정에서
+공식 배포처의 고정된 XIV on Mac 아카이브를 직접 다운로드하고, SHA-256을
+검증한 뒤 WineCX와 DXMT를 사용합니다. XIV on Mac은 GPL-3.0이며 WineCX와 DXMT에는
 LGPL-2.1-or-later가 계속 적용됩니다.
 
 - https://github.com/marzent/XIV-on-Mac
