@@ -5,4 +5,5 @@
 node_modules/
 out/
 Tools/zipatch-helper/target/
+Tools/zipatch-helper/.patched/
 *.log

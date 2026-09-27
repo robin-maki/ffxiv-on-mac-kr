@@ -14,6 +14,7 @@ if ! command -v cargo >/dev/null 2>&1; then
   print -u2 "cargo is required to package the ZiPatch helper (Rust 1.85+)."
   exit 1
 fi
+"$root_dir/Tools/zipatch-helper/prepare.sh"
 cargo build --release --locked --manifest-path "$helper_manifest"
 helper_binary="$root_dir/Tools/zipatch-helper/target/release/zipatch-helper"
 if [[ ! -x "$helper_binary" ]]; then
